@@ -3,56 +3,34 @@ import { useEffect } from "react";
 
 export default function Home() {
   useEffect(() => {
-    if (typeof window === "undefined") return; // ✅ Run only in browser
-
-    // === Load persisted data ===
-    let accounts = JSON.parse(localStorage.getItem("accounts")) || { "marwan_alsaadi": "Aladdin@0" };
-    let assignments = JSON.parse(localStorage.getItem("assignments")) || [];
-    let activity = JSON.parse(localStorage.getItem("activity")) || [];
-    let chats = JSON.parse(localStorage.getItem("chats")) || [];
-    let scheduleData = JSON.parse(localStorage.getItem("scheduleData")) || {
-      "Dimanche 7 septembre 2025": [
-        "08:30-10:25 Histoire-Géo (D13) → Introduction au monde Grec | À faire: Guerres Médiques",
-        "10:40-11:35 Mathématiques (D21) → Calculs littéraux",
-        "11:40-12:35 Physique-Chimie (B21-PC) → Cours | À faire: Exercices",
-        "14:25-15:20 EMC (D15-Info) → Axe Les libertés | À faire: Recherche",
-        "15:25-16:20 SES (D11)"
-      ],
-      "Lundi 8 septembre 2025": [
-        "08:30-09:25 Anglais (D14) → Commonwealth Nations | À faire: Bring laptop",
-        "09:30-10:25 Mathématiques (D29)",
-        "10:40-11:35 SVT (B23-SVT)",
-        "11:40-12:35 SES (D29)"
-      ]
-    };
-
     let currentChat = null, currentUser = null, isAdmin = false;
 
-    function save() {
-      localStorage.setItem("accounts", JSON.stringify(accounts));
-      localStorage.setItem("assignments", JSON.stringify(assignments));
-      localStorage.setItem("activity", JSON.stringify(activity));
-      localStorage.setItem("chats", JSON.stringify(chats));
-      localStorage.setItem("scheduleData", JSON.stringify(scheduleData));
+    // === Helpers ===
+    async function apiCall(body) {
+      const res = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return res.json();
     }
 
-    // === LOGIN ===
-    document.getElementById("loginBtn").addEventListener("click", () => {
+    // LOGIN
+    document.getElementById("loginBtn").addEventListener("click", async () => {
       const u = document.getElementById("username").value.trim();
       const p = document.getElementById("password").value.trim();
-      if (accounts[u] && accounts[u] === p) {
-        currentUser = u;
-        isAdmin = (u === "marwan_alsaadi");
+      const data = await apiCall({ action: "login", username: u, password: p });
+      if (data.success) {
+        currentUser = u; isAdmin = data.admin;
         document.getElementById("loginBox").style.display = "none";
         document.getElementById("mainHeader").classList.remove("hidden");
         document.getElementById("mainApp").classList.remove("hidden");
         if (isAdmin) document.getElementById("adminTabBtn").classList.remove("hidden");
-        updateDashboard(); renderAssignments(); renderAccounts(); renderChatList(); renderSchedule();
-        if (chats.length === 0) { newChat(); } else { currentChat = chats[chats.length - 1].id; renderMessages(); }
+        loadAssignments(); renderChatList(); loadSchedule();
       } else alert("❌ Invalid login");
     });
 
-    // === SWITCH TABS ===
+    // SWITCH TABS
     function switchTab(tab) {
       document.querySelectorAll(".tab").forEach(t => t.classList.add("hidden"));
       document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
@@ -65,104 +43,60 @@ export default function Home() {
     });
 
     // === CHAT ===
-    function newChat() {
-      const id = Date.now();
-      const c = { id, name: "New Chat", messages: [] };
-      chats.push(c); currentChat = id; save(); renderChatList(); renderMessages();
+    async function newChat() {
+      currentChat = Date.now();
+      renderMessages([]);
     }
-    function renderChatList() {
-      const list = document.getElementById("chatList");
-      list.innerHTML = "";
-      chats.forEach(c => {
-        const div = document.createElement("div");
-        div.className = "chatItem";
-        div.textContent = c.name;
-        div.onclick = () => { currentChat = c.id; renderMessages(); };
-        list.appendChild(div);
-      });
-    }
-    function renderMessages() {
-      const chat = chats.find(c => c.id === currentChat);
+    function renderMessages(msgs) {
       const box = document.getElementById("chatBox");
       box.innerHTML = "";
-      if (!chat) return;
-      chat.messages.forEach(m => {
+      msgs.forEach(m => {
         const div = document.createElement("div");
         div.className = "msg " + m.role;
         div.textContent = m.text;
         box.appendChild(div);
       });
-      setTimeout(() => { box.scrollTop = box.scrollHeight; }, 50); // auto-scroll
+      setTimeout(() => { box.scrollTop = box.scrollHeight; }, 50);
     }
-    function addMessage(role, text) {
-      const chat = chats.find(c => c.id === currentChat);
-      if (!chat) return;
-      chat.messages.push({ role, text });
-      if (chat.name === "New Chat" && role === "user") chat.name = text.slice(0, 15) + "...";
-      save(); renderChatList(); renderMessages();
+    async function addMessage(role, text) {
+      if (!currentChat) await newChat();
+      await apiCall({ action: "addMessage", chatId: currentChat, message: { role, text } });
+      const data = await apiCall({ action: "getChat", chatId: currentChat });
+      renderMessages(data.messages);
     }
-
     let stopTyping = false;
     async function typeWriter(text) {
-      const chat = chats.find(c => c.id === currentChat);
-      if (!chat) return;
       let msg = { role: "ai", text: "" };
-      chat.messages.push(msg);
-      document.getElementById("stopBtn").style.display = "inline-block";
       for (let i = 0; i < text.length; i++) {
-        if (stopTyping) { msg.text = text; renderMessages(); break; }
-        msg.text += text[i]; renderMessages();
+        if (stopTyping) { msg.text = text; break; }
+        msg.text += text[i];
+        renderMessages([...document.querySelectorAll("#chatBox .msg")].map(div => ({ role: div.classList[1], text: div.textContent })).concat(msg));
         await new Promise(r => setTimeout(r, 5));
       }
       stopTyping = false;
-      document.getElementById("stopBtn").style.display = "none";
-      save();
     }
     document.getElementById("stopBtn").addEventListener("click", () => { stopTyping = true; });
 
-    // === ASK AI ===
+    // ASK AI
     window.askAI = async function () {
       const q = document.getElementById("question").value.trim();
       if (!q) return;
-      if (!currentChat) newChat();
-
-      addMessage("user", q);
-      addMessage("ai", "🤔 Thinking...");
+      await addMessage("user", q);
+      await addMessage("ai", "🤔 Thinking...");
       document.getElementById("question").value = "";
-
-      try {
-        const res = await fetch("/api/ask", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ q, web: false })
-        });
-        const data = await res.json();
-        typeWriter(data.reply);
-      } catch (e) {
-        addMessage("ai", "Error: " + e.message);
-      }
+      const data = await apiCall({ q, web: false });
+      typeWriter(data.reply);
     };
 
-    // === WEB SEARCH ===
+    // WEB SEARCH
     async function webSearch() {
       const q = document.getElementById("question").value.trim(); if (!q) return;
-      if (!currentChat) newChat();
-
-      addMessage("user", q + " (search)");
-      addMessage("search", "🌍 Searching the web...");
+      await addMessage("user", q + " (search)");
+      await addMessage("search", "🌍 Searching the web...");
       document.getElementById("question").value = "";
-
-      try {
-        const res = await fetch("/api/ask", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ q, web: true })
-        });
-        const data = await res.json();
-        typeWriter("[Web] " + data.reply);
-      } catch (e) { addMessage("search", "Search error: " + e.message); }
+      const data = await apiCall({ q, web: true });
+      typeWriter("[Web] " + data.reply);
     }
-
     document.getElementById("searchBtn").addEventListener("click", webSearch);
     document.getElementById("question").addEventListener("keydown", e => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); window.askAI(); }
@@ -170,32 +104,11 @@ export default function Home() {
 
     document.getElementById("newChatBtn").addEventListener("click", newChat);
     // === DASHBOARD ===
-    function updateDashboard() {
-      document.getElementById("todayDate").textContent = "Today: " + new Date().toDateString();
-      if (assignments.length > 0) {
-        const next = assignments.sort((a, b) => new Date(a.date) - new Date(b.date))[0];
-        document.getElementById("nextAssignment").textContent = `${next.title} (${next.type}) due ${next.date}`;
-      }
-      const feed = document.getElementById("activityFeed");
-      feed.innerHTML = "";
-      activity.slice(-5).reverse().forEach(a => {
-        let li = document.createElement("li");
-        li.textContent = a;
-        feed.appendChild(li);
-      });
+    async function loadAssignments() {
+      const data = await apiCall({ action: "getAssignments" });
+      renderAssignments(data.assignments || []);
     }
-
-    // === ASSIGNMENTS ===
-    function addAssignment() {
-      const t = document.getElementById("assTitle").value.trim();
-      const ty = document.getElementById("assType").value;
-      const d = document.getElementById("assDate").value;
-      if (!t || !d) return alert("Fill all fields");
-      assignments.push({ title: t, type: ty, date: d, user: currentUser });
-      activity.push(`${currentUser} added ${ty} → ${t}`);
-      save(); renderAssignments(); updateDashboard();
-    }
-    function renderAssignments() {
+    function renderAssignments(assignments) {
       const list = document.getElementById("assignmentsList");
       list.innerHTML = "";
       assignments.forEach((a, i) => {
@@ -205,54 +118,45 @@ export default function Home() {
         if (isAdmin) {
           const btn = document.createElement("button");
           btn.textContent = "🗑";
-          btn.onclick = () => { assignments.splice(i, 1); save(); renderAssignments(); updateDashboard(); };
+          btn.onclick = async () => {
+            await apiCall({ action: "deleteAssignment", index: i });
+            loadAssignments();
+          };
           div.appendChild(btn);
         }
         list.appendChild(div);
       });
     }
-    document.getElementById("addAssignmentBtn").addEventListener("click", addAssignment);
-
-    // === ADMIN ===
-    function renderAccounts() {
-      const list = document.getElementById("accountsList");
-      list.innerHTML = "";
-      Object.keys(accounts).forEach(u => {
-        if (u === "marwan_alsaadi") return;
-        const div = document.createElement("div");
-        const del = document.createElement("button");
-        del.textContent = "Delete";
-        del.onclick = () => { delete accounts[u]; save(); renderAccounts(); };
-        div.innerHTML = `<b>${u}</b> `;
-        div.appendChild(del);
-        list.appendChild(div);
-      });
-    }
-    document.getElementById("createAccountBtn").addEventListener("click", () => {
-      if (!isAdmin) return;
-      const u = document.getElementById("newUser").value.trim();
-      const p = document.getElementById("newPass").value.trim();
-      if (!u || !p) return alert("Fill fields");
-      accounts[u] = p; save(); renderAccounts(); alert("✅ Created " + u);
+    document.getElementById("addAssignmentBtn").addEventListener("click", async () => {
+      const t = document.getElementById("assTitle").value.trim();
+      const ty = document.getElementById("assType").value;
+      const d = document.getElementById("assDate").value;
+      if (!t || !d) return alert("Fill all fields");
+      await apiCall({ action: "addAssignment", title: t, type: ty, date: d, user: currentUser });
+      loadAssignments();
     });
 
     // === SCHEDULE ===
-    function renderSchedule() {
+    async function loadSchedule() {
+      const data = await apiCall({ action: "getSchedule" });
+      renderSchedule(data.schedule || {});
+    }
+    function renderSchedule(schedule) {
       const list = document.getElementById("scheduleList");
       list.innerHTML = "";
-      Object.keys(scheduleData).forEach(day => {
+      Object.keys(schedule).forEach(day => {
         const div = document.createElement("div");
         div.className = "card";
-        div.innerHTML = `<h3>${day}</h3><ul>${scheduleData[day].map(c => "<li>" + c + "</li>").join("")}</ul>`;
+        div.innerHTML = `<h3>${day}</h3><ul>${schedule[day].map(c => "<li>" + c + "</li>").join("")}</ul>`;
         if (isAdmin) {
           const textarea = document.createElement("textarea");
           textarea.style.width = "100%";
-          textarea.value = scheduleData[day].join("\n");
+          textarea.value = schedule[day].join("\n");
           const btn = document.createElement("button");
           btn.textContent = "💾 Save";
-          btn.onclick = () => {
-            scheduleData[day] = textarea.value.split("\n");
-            save(); renderSchedule();
+          btn.onclick = async () => {
+            await apiCall({ action: "updateSchedule", username: "dummy", password: textarea.value.split("\n"), caller: currentUser });
+            loadSchedule();
           };
           div.appendChild(textarea);
           div.appendChild(btn);
@@ -260,9 +164,41 @@ export default function Home() {
         list.appendChild(div);
       });
     }
+
+    // === ADMIN ===
+    async function loadAccounts() {
+      const data = await apiCall({ action: "getAccounts" });
+      renderAccounts(data.accounts || {});
+    }
+    function renderAccounts(accounts) {
+      const list = document.getElementById("accountsList");
+      list.innerHTML = "";
+      Object.keys(accounts).forEach(u => {
+        if (u === "marwan_alsaadi") return;
+        const div = document.createElement("div");
+        div.innerHTML = `<b>${u}</b>`;
+        if (isAdmin) {
+          const del = document.createElement("button");
+          del.textContent = "Delete";
+          del.onclick = async () => {
+            await apiCall({ action: "deleteUser", username: u, caller: currentUser });
+            loadAccounts();
+          };
+          div.appendChild(del);
+        }
+        list.appendChild(div);
+      });
+    }
+    document.getElementById("createAccountBtn").addEventListener("click", async () => {
+      if (!isAdmin) return;
+      const u = document.getElementById("newUser").value.trim();
+      const p = document.getElementById("newPass").value.trim();
+      if (!u || !p) return alert("Fill fields");
+      await apiCall({ action: "createUser", username: u, password: p, caller: currentUser });
+      loadAccounts();
+    });
   }, []);
 
-  // === RETURN JSX (UI) ===
   return (
     <div>
       <style>{`
@@ -297,6 +233,7 @@ export default function Home() {
         input{width:100%;margin:6px 0;padding:10px;border:none;border-radius:6px;}
       `}</style>
 
+      {/* Login */}
       <div id="loginBox">
         <div className="card">
           <h2>Login</h2>
@@ -307,6 +244,7 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Header */}
       <header className="hidden" id="mainHeader">
         <h1>📚 AI Study Hub – 2nde 1</h1>
         <nav>
@@ -318,6 +256,7 @@ export default function Home() {
         </nav>
       </header>
 
+      {/* Main */}
       <div className="container hidden" id="mainApp">
         <div id="sidebar" className="hidden">
           <h2>💬 Chats</h2>
