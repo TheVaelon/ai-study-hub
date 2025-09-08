@@ -3,36 +3,53 @@ import { useEffect } from "react";
 
 export default function Home() {
   useEffect(() => {
+    if (typeof window === "undefined") return; // ✅ Run only in browser
+
+    // === Load persisted data ===
+    let accounts = JSON.parse(localStorage.getItem("accounts")) || { "marwan_alsaadi": "Aladdin@0" };
+    let assignments = JSON.parse(localStorage.getItem("assignments")) || [];
+    let activity = JSON.parse(localStorage.getItem("activity")) || [];
+    let chats = JSON.parse(localStorage.getItem("chats")) || [];
+    let scheduleData = JSON.parse(localStorage.getItem("scheduleData")) || {
+      "Dimanche 7 septembre 2025": [
+        "08:30-10:25 Histoire-Géo (D13) → Introduction au monde Grec | À faire: Guerres Médiques",
+        "10:40-11:35 Mathématiques (D21) → Calculs littéraux",
+        "11:40-12:35 Physique-Chimie (B21-PC) → Cours | À faire: Exercices",
+        "14:25-15:20 EMC (D15-Info) → Axe Les libertés | À faire: Recherche",
+        "15:25-16:20 SES (D11)"
+      ],
+      "Lundi 8 septembre 2025": [
+        "08:30-09:25 Anglais (D14) → Commonwealth Nations | À faire: Bring laptop",
+        "09:30-10:25 Mathématiques (D29)",
+        "10:40-11:35 SVT (B23-SVT)",
+        "11:40-12:35 SES (D29)"
+      ]
+    };
+
     let currentChat = null, currentUser = null, isAdmin = false;
 
-    // === Helper: API call to backend ===
-    async function api(body) {
-      const res = await fetch("/api/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      return res.json();
+    function save() {
+      localStorage.setItem("accounts", JSON.stringify(accounts));
+      localStorage.setItem("assignments", JSON.stringify(assignments));
+      localStorage.setItem("activity", JSON.stringify(activity));
+      localStorage.setItem("chats", JSON.stringify(chats));
+      localStorage.setItem("scheduleData", JSON.stringify(scheduleData));
     }
 
     // === LOGIN ===
-    document.getElementById("loginBtn").addEventListener("click", async () => {
+    document.getElementById("loginBtn").addEventListener("click", () => {
       const u = document.getElementById("username").value.trim();
       const p = document.getElementById("password").value.trim();
-      const res = await api({ action: "login", username: u, password: p });
-      if (res.success) {
-        currentUser = u; 
+      if (accounts[u] && accounts[u] === p) {
+        currentUser = u;
         isAdmin = (u === "marwan_alsaadi");
         document.getElementById("loginBox").style.display = "none";
         document.getElementById("mainHeader").classList.remove("hidden");
         document.getElementById("mainApp").classList.remove("hidden");
         if (isAdmin) document.getElementById("adminTabBtn").classList.remove("hidden");
         updateDashboard(); renderAssignments(); renderAccounts(); renderChatList(); renderSchedule();
-        if (!res.chats || res.chats.length === 0) { newChat(); } 
-        else { currentChat = res.chats[res.chats.length - 1].id; renderMessages(res.chats); }
-      } else {
-        alert("❌ Invalid login");
-      }
+        if (chats.length === 0) { newChat(); } else { currentChat = chats[chats.length - 1].id; renderMessages(); }
+      } else alert("❌ Invalid login");
     });
 
     // === SWITCH TABS ===
@@ -48,16 +65,15 @@ export default function Home() {
     });
 
     // === CHAT ===
-    async function newChat() {
+    function newChat() {
       const id = Date.now();
-      await api({ action: "newChat", id, caller: currentUser });
-      currentChat = id; renderChatList(); renderMessages();
+      const c = { id, name: "New Chat", messages: [] };
+      chats.push(c); currentChat = id; save(); renderChatList(); renderMessages();
     }
-    async function renderChatList() {
-      const res = await api({ action: "getChats", caller: currentUser });
+    function renderChatList() {
       const list = document.getElementById("chatList");
       list.innerHTML = "";
-      res.chats.forEach(c => {
+      chats.forEach(c => {
         const div = document.createElement("div");
         div.className = "chatItem";
         div.textContent = c.name;
@@ -65,9 +81,8 @@ export default function Home() {
         list.appendChild(div);
       });
     }
-    async function renderMessages(chatsData) {
-      const res = chatsData || await api({ action: "getChats", caller: currentUser });
-      const chat = res.chats.find(c => c.id === currentChat);
+    function renderMessages() {
+      const chat = chats.find(c => c.id === currentChat);
       const box = document.getElementById("chatBox");
       box.innerHTML = "";
       if (!chat) return;
@@ -79,145 +94,165 @@ export default function Home() {
       });
       setTimeout(() => { box.scrollTop = box.scrollHeight; }, 50); // auto-scroll
     }
-    async function addMessage(role, text) {
-      await api({ action: "addMessage", caller: currentUser, chatId: currentChat, role, text });
-      renderChatList(); renderMessages();
-    }
-    let stopTyping = false;
-    async function typeWriter(text) {
-      const res = await api({ action: "addMessage", caller: currentUser, chatId: currentChat, role: "ai", text: "" });
-      let msgText = "";
-      document.getElementById("stopBtn").style.display = "inline-block";
-      for (let i = 0; i < text.length; i++) {
-        if (stopTyping) { msgText = text; break; }
-        msgText += text[i];
-        await api({ action: "updateLastMessage", caller: currentUser, chatId: currentChat, text: msgText });
-        renderMessages();
-        await new Promise(r => setTimeout(r, 5));
-      }
-      stopTyping = false;
-      document.getElementById("stopBtn").style.display = "none";
-    }
-    document.getElementById("stopBtn").addEventListener("click", () => { stopTyping = true; });
-"use client";
-import { useEffect } from "react";
-
-export default function Home() {
-  useEffect(() => {
-    let currentChat = null, currentUser = null, isAdmin = false;
-
-    // === Helper: API call to backend ===
-    async function api(body) {
-      const res = await fetch("/api/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      return res.json();
-    }
-
-    // === LOGIN ===
-    document.getElementById("loginBtn").addEventListener("click", async () => {
-      const u = document.getElementById("username").value.trim();
-      const p = document.getElementById("password").value.trim();
-      const res = await api({ action: "login", username: u, password: p });
-      if (res.success) {
-        currentUser = u; 
-        isAdmin = (u === "marwan_alsaadi");
-        document.getElementById("loginBox").style.display = "none";
-        document.getElementById("mainHeader").classList.remove("hidden");
-        document.getElementById("mainApp").classList.remove("hidden");
-        if (isAdmin) document.getElementById("adminTabBtn").classList.remove("hidden");
-        updateDashboard(); renderAssignments(); renderAccounts(); renderChatList(); renderSchedule();
-        if (!res.chats || res.chats.length === 0) { newChat(); } 
-        else { currentChat = res.chats[res.chats.length - 1].id; renderMessages(res.chats); }
-      } else {
-        alert("❌ Invalid login");
-      }
-    });
-
-    // === SWITCH TABS ===
-    function switchTab(tab) {
-      document.querySelectorAll(".tab").forEach(t => t.classList.add("hidden"));
-      document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
-      document.getElementById(tab).classList.remove("hidden");
-      document.querySelector(`nav button[data-tab="${tab}"]`).classList.add("active");
-      document.getElementById("sidebar").classList.toggle("hidden", tab !== "aistudy");
-    }
-    document.querySelectorAll("nav button[data-tab]").forEach(btn => {
-      btn.addEventListener("click", () => switchTab(btn.dataset.tab));
-    });
-
-    // === CHAT ===
-    async function newChat() {
-      const id = Date.now();
-      await api({ action: "newChat", id, caller: currentUser });
-      currentChat = id; renderChatList(); renderMessages();
-    }
-    async function renderChatList() {
-      const res = await api({ action: "getChats", caller: currentUser });
-      const list = document.getElementById("chatList");
-      list.innerHTML = "";
-      res.chats.forEach(c => {
-        const div = document.createElement("div");
-        div.className = "chatItem";
-        div.textContent = c.name;
-        div.onclick = () => { currentChat = c.id; renderMessages(); };
-        list.appendChild(div);
-      });
-    }
-    async function renderMessages(chatsData) {
-      const res = chatsData || await api({ action: "getChats", caller: currentUser });
-      const chat = res.chats.find(c => c.id === currentChat);
-      const box = document.getElementById("chatBox");
-      box.innerHTML = "";
+    function addMessage(role, text) {
+      const chat = chats.find(c => c.id === currentChat);
       if (!chat) return;
-      chat.messages.forEach(m => {
-        const div = document.createElement("div");
-        div.className = "msg " + m.role;
-        div.textContent = m.text;
-        box.appendChild(div);
-      });
-      setTimeout(() => { box.scrollTop = box.scrollHeight; }, 50); // auto-scroll
+      chat.messages.push({ role, text });
+      if (chat.name === "New Chat" && role === "user") chat.name = text.slice(0, 15) + "...";
+      save(); renderChatList(); renderMessages();
     }
-    async function addMessage(role, text) {
-      await api({ action: "addMessage", caller: currentUser, chatId: currentChat, role, text });
-      renderChatList(); renderMessages();
-    }
+
     let stopTyping = false;
     async function typeWriter(text) {
-      const res = await api({ action: "addMessage", caller: currentUser, chatId: currentChat, role: "ai", text: "" });
-      let msgText = "";
+      const chat = chats.find(c => c.id === currentChat);
+      if (!chat) return;
+      let msg = { role: "ai", text: "" };
+      chat.messages.push(msg);
       document.getElementById("stopBtn").style.display = "inline-block";
       for (let i = 0; i < text.length; i++) {
-        if (stopTyping) { msgText = text; break; }
-        msgText += text[i];
-        await api({ action: "updateLastMessage", caller: currentUser, chatId: currentChat, text: msgText });
-        renderMessages();
+        if (stopTyping) { msg.text = text; renderMessages(); break; }
+        msg.text += text[i]; renderMessages();
         await new Promise(r => setTimeout(r, 5));
       }
       stopTyping = false;
       document.getElementById("stopBtn").style.display = "none";
+      save();
     }
     document.getElementById("stopBtn").addEventListener("click", () => { stopTyping = true; });
-    // === ADMIN: Schedule ===
-    async function renderSchedule() {
-      const res = await api({ action: "getSchedule" });
-      const list = document.getElementById("scheduleList");
+
+    // === ASK AI ===
+    window.askAI = async function () {
+      const q = document.getElementById("question").value.trim();
+      if (!q) return;
+      if (!currentChat) newChat();
+
+      addMessage("user", q);
+      addMessage("ai", "🤔 Thinking...");
+      document.getElementById("question").value = "";
+
+      try {
+        const res = await fetch("/api/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ q, web: false })
+        });
+        const data = await res.json();
+        typeWriter(data.reply);
+      } catch (e) {
+        addMessage("ai", "Error: " + e.message);
+      }
+    };
+
+    // === WEB SEARCH ===
+    async function webSearch() {
+      const q = document.getElementById("question").value.trim(); if (!q) return;
+      if (!currentChat) newChat();
+
+      addMessage("user", q + " (search)");
+      addMessage("search", "🌍 Searching the web...");
+      document.getElementById("question").value = "";
+
+      try {
+        const res = await fetch("/api/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ q, web: true })
+        });
+        const data = await res.json();
+        typeWriter("[Web] " + data.reply);
+      } catch (e) { addMessage("search", "Search error: " + e.message); }
+    }
+
+    document.getElementById("searchBtn").addEventListener("click", webSearch);
+    document.getElementById("question").addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); window.askAI(); }
+    });
+
+    document.getElementById("newChatBtn").addEventListener("click", newChat);
+    // === DASHBOARD ===
+    function updateDashboard() {
+      document.getElementById("todayDate").textContent = "Today: " + new Date().toDateString();
+      if (assignments.length > 0) {
+        const next = assignments.sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+        document.getElementById("nextAssignment").textContent = `${next.title} (${next.type}) due ${next.date}`;
+      }
+      const feed = document.getElementById("activityFeed");
+      feed.innerHTML = "";
+      activity.slice(-5).reverse().forEach(a => {
+        let li = document.createElement("li");
+        li.textContent = a;
+        feed.appendChild(li);
+      });
+    }
+
+    // === ASSIGNMENTS ===
+    function addAssignment() {
+      const t = document.getElementById("assTitle").value.trim();
+      const ty = document.getElementById("assType").value;
+      const d = document.getElementById("assDate").value;
+      if (!t || !d) return alert("Fill all fields");
+      assignments.push({ title: t, type: ty, date: d, user: currentUser });
+      activity.push(`${currentUser} added ${ty} → ${t}`);
+      save(); renderAssignments(); updateDashboard();
+    }
+    function renderAssignments() {
+      const list = document.getElementById("assignmentsList");
       list.innerHTML = "";
-      Object.keys(res.schedule || {}).forEach(day => {
+      assignments.forEach((a, i) => {
         const div = document.createElement("div");
         div.className = "card";
-        div.innerHTML = `<h3>${day}</h3><ul>${res.schedule[day].map(c => "<li>" + c + "</li>").join("")}</ul>`;
+        div.innerHTML = `<b>${a.title}</b> (${a.type}) due ${a.date}<br><small>by ${a.user}</small>`;
+        if (isAdmin) {
+          const btn = document.createElement("button");
+          btn.textContent = "🗑";
+          btn.onclick = () => { assignments.splice(i, 1); save(); renderAssignments(); updateDashboard(); };
+          div.appendChild(btn);
+        }
+        list.appendChild(div);
+      });
+    }
+    document.getElementById("addAssignmentBtn").addEventListener("click", addAssignment);
+
+    // === ADMIN ===
+    function renderAccounts() {
+      const list = document.getElementById("accountsList");
+      list.innerHTML = "";
+      Object.keys(accounts).forEach(u => {
+        if (u === "marwan_alsaadi") return;
+        const div = document.createElement("div");
+        const del = document.createElement("button");
+        del.textContent = "Delete";
+        del.onclick = () => { delete accounts[u]; save(); renderAccounts(); };
+        div.innerHTML = `<b>${u}</b> `;
+        div.appendChild(del);
+        list.appendChild(div);
+      });
+    }
+    document.getElementById("createAccountBtn").addEventListener("click", () => {
+      if (!isAdmin) return;
+      const u = document.getElementById("newUser").value.trim();
+      const p = document.getElementById("newPass").value.trim();
+      if (!u || !p) return alert("Fill fields");
+      accounts[u] = p; save(); renderAccounts(); alert("✅ Created " + u);
+    });
+
+    // === SCHEDULE ===
+    function renderSchedule() {
+      const list = document.getElementById("scheduleList");
+      list.innerHTML = "";
+      Object.keys(scheduleData).forEach(day => {
+        const div = document.createElement("div");
+        div.className = "card";
+        div.innerHTML = `<h3>${day}</h3><ul>${scheduleData[day].map(c => "<li>" + c + "</li>").join("")}</ul>`;
         if (isAdmin) {
           const textarea = document.createElement("textarea");
           textarea.style.width = "100%";
-          textarea.value = res.schedule[day].join("\n");
+          textarea.value = scheduleData[day].join("\n");
           const btn = document.createElement("button");
           btn.textContent = "💾 Save";
-          btn.onclick = async () => {
-            await api({ action: "updateSchedule", password: textarea.value.split("\n"), username: day, caller: currentUser });
-            renderSchedule();
+          btn.onclick = () => {
+            scheduleData[day] = textarea.value.split("\n");
+            save(); renderSchedule();
           };
           div.appendChild(textarea);
           div.appendChild(btn);
@@ -227,37 +262,39 @@ export default function Home() {
     }
   }, []);
 
+  // === RETURN JSX (UI) ===
   return (
     <div>
       <style>{`
-        body {margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;height:100vh;overflow:hidden;}
+        body {margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
         header{padding:12px 20px;background:rgba(0,0,0,0.3);display:flex;justify-content:space-between;align-items:center;backdrop-filter:blur(10px);box-shadow:0 4px 15px rgba(0,0,0,0.3);}
-        nav button{margin-left:10px;background:rgba(255,255,255,0.15);border:none;border-radius:8px;padding:10px 16px;color:#fff;cursor:pointer;font-weight:600;transition:all 0.3s;}
-        nav button:hover,nav button.active{background:#4c6ef5;transform:scale(1.05);}
+        nav button{margin-left:10px;background:rgba(255,255,255,0.15);border:none;border-radius:6px;padding:8px 14px;color:#fff;cursor:pointer;transition:0.3s;}
+        nav button:hover,nav button.active{background:#4c6ef5;}
         .container{flex:1;display:flex;overflow:hidden;}
         #sidebar{width:240px;background:rgba(0,0,0,0.25);padding:15px;display:flex;flex-direction:column;backdrop-filter:blur(8px);border-right:1px solid rgba(255,255,255,0.2);}
         #sidebar h2{font-size:16px;margin-bottom:12px;}
-        .chatItem{background:rgba(255,255,255,0.1);padding:10px;border-radius:10px;margin-bottom:10px;cursor:pointer;transition:0.3s;}
-        .chatItem:hover{background:rgba(255,255,255,0.25);transform:translateX(5px);}
-        #newChatBtn{background:#238636;border:none;border-radius:8px;padding:12px;color:#fff;font-weight:bold;cursor:pointer;margin-top:auto;transition:0.3s;}
-        #newChatBtn:hover{background:#2ea043;transform:scale(1.05);}
+        .chatItem{background:rgba(255,255,255,0.1);padding:8px;border-radius:6px;margin-bottom:8px;cursor:pointer;}
+        .chatItem:hover{background:rgba(255,255,255,0.25);}
+        #newChatBtn{background:#238636;border:none;border-radius:6px;padding:10px;color:#fff;font-weight:bold;cursor:pointer;margin-top:auto;}
+        #newChatBtn:hover{background:#2ea043;}
         .main{flex:1;padding:20px;overflow-y:auto;}
-        .card{background:rgba(255,255,255,0.1);border-radius:14px;padding:20px;margin-bottom:20px;backdrop-filter:blur(12px);box-shadow:0 6px 25px rgba(0,0,0,0.35);transition:0.3s;}
-        .card:hover{transform:scale(1.01);}
+        .card{background:rgba(255,255,255,0.1);border-radius:12px;padding:20px;margin-bottom:20px;backdrop-filter:blur(12px);box-shadow:0 4px 20px rgba(0,0,0,0.3);}
         .hidden{display:none;}
-        #chatBox{height:60vh;overflow-y:auto;background:rgba(0,0,0,0.3);padding:15px;border-radius:10px;display:flex;flex-direction:column;}
-        .msg{margin:10px 0;padding:12px 16px;border-radius:10px;max-width:75%;font-size:15px;line-height:1.4;}
+        #chatBox{height:60vh;overflow-y:auto;background:rgba(0,0,0,0.2);padding:15px;border-radius:8px;display:flex;flex-direction:column;}
+        .msg{margin:10px 0;padding:10px 14px;border-radius:8px;max-width:70%;}
         .user{background:#2563eb;color:#fff;margin-left:auto;text-align:right;}
         .ai{background:#2d2d2d;color:#f4c542;margin-right:auto;text-align:left;}
         .search{background:#3b3b98;color:#fff;margin-right:auto;text-align:left;}
         .chatInputBox{display:flex;margin-top:10px;gap:10px;}
-        .chatInputBox input{flex:1;padding:14px;border:none;border-radius:10px;background:rgba(0,0,0,0.35);color:#fff;font-size:14px;}
-        .chatInputBox button{border:none;border-radius:10px;padding:12px 16px;font-weight:bold;cursor:pointer;transition:0.3s;}
-        #searchBtn{background:#6e40c9;color:#fff;} #searchBtn:hover{background:#925ee4;}
-        #stopBtn{display:none;background:#ff4d4d;color:#fff;} #stopBtn:hover{background:#ff6666;}
+        .chatInputBox input{flex:1;padding:12px;border:none;border-radius:8px;background:rgba(0,0,0,0.3);color:#fff;}
+        .chatInputBox button{border:none;border-radius:8px;padding:12px 16px;font-weight:bold;cursor:pointer;}
+        #searchBtn{background:#6e40c9;color:#fff;}
+        #searchBtn:hover{background:#925ee4;}
+        #stopBtn{display:none;background:#ff4d4d;color:#fff;}
+        #stopBtn:hover{background:#ff6666;}
         #loginBox{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3c72,#2a5298);}
-        #loginBox .card{width:320px;}
-        input{width:100%;margin:6px 0;padding:12px;border:none;border-radius:8px;}
+        #loginBox .card{width:300px;}
+        input{width:100%;margin:6px 0;padding:10px;border:none;border-radius:6px;}
       `}</style>
 
       <div id="loginBox">
@@ -322,8 +359,6 @@ export default function Home() {
             <input id="newUser" placeholder="New Username"/>
             <input id="newPass" placeholder="New Password"/>
             <button id="createAccountBtn">Create User</button>
-            <textarea id="announceText" placeholder="Write announcement..."></textarea>
-            <button id="announceBtn">Send Announcement</button>
           </div>
         </div>
       </div>
