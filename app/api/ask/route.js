@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
-const OPENAI_KEY = process.env.OPENAI_KEY;
 const SERPER_KEY = process.env.SERPER_KEY;
 
 // === File Helpers ===
@@ -135,7 +134,7 @@ export async function POST(req) {
 
       const summaryRes = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_KEY}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_KEY}` },
         body: JSON.stringify({
           model: "gpt-4o-mini",
           messages: [
@@ -153,14 +152,12 @@ export async function POST(req) {
     }
   }
 
-// ...existing code...
-
 // === Normal AI Q&A ===
 try {
   console.log('Sending to OpenAI:', q);
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_KEY}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_KEY}` },
     body: JSON.stringify({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: q }],
@@ -168,6 +165,9 @@ try {
   });
   const data = await res.json();
   console.log('OpenAI response:', data);
+  if (data.error) {
+    return NextResponse.json({ reply: `❌ OpenAI error: ${data.error.message}` });
+  }
   return NextResponse.json({
     reply: data.choices?.[0]?.message?.content || "No reply from AI",
   });
